@@ -203,25 +203,27 @@ style.set_row_height(22.0);
 
 | Category | Property | Default |
 |---|---|---|
-| **Colors** | `background-color` | `white` |
-| | `text-color` | `black` |
-| | `disabled-text-color` | `#999` |
-| | `highlight-color` / `highlighted-text-color` | `#cce4ff` / `black` |
+| **Colors** | `background-color` | `Palette.background` |
+| | `text-color` | `Palette.foreground` |
+| | `disabled-text-color` | `Palette.alternate-foreground` |
+| | `highlight-color` / `highlighted-text-color` | `Palette.selection-background` / `Palette.selection-foreground` |
 | | `inactive-highlight-color` / `inactive-highlighted-text-color` | `#e8e8e8` / `black` |
 | | `hover-color` | `#f0f7ff` |
 | | `branch-indicator-color` | `#555` |
-| | `branch-line-color` | `transparent` (sets the indent strip's bg; real L/T guide lines are roadmap) |
+| | `branch-line-color` | `Palette.border` (sets the indent strip's bg; real L/T guide lines are roadmap) |
 | | `drop-indicator-color` | `#2266aa` (reserved for future DnD) |
 | **Dimensions** | `row-height` | `28px` |
 | | `indentation` | `20px` |
 | | `branch-indicator-width` | `16px` |
 | | `decoration-spacing` | `6px` |
-| | `horizontal-padding` | `4px` |
+| | `horizontal-padding` | `StyleMetrics.layout-padding` |
 | **Opacity** | `disabled-opacity` | `0.6` (multiplied onto disabled rows on top of the greyed text color) |
 | **Glyphs** | `expanded-branch-indicator` | `▼` |
 | | `collapsed-branch-indicator` | `▶` |
 
 Behavior flags (`items-expandable`, `root-is-decorated`, `expands-on-double-click`, `activation-mode`, `hover-highlight`, `page-size`) are **per-instance** properties on `TreeView`, not on the global — they can differ between TreeViews in the same app. The global only carries theme colors / dimensions / glyphs.
+
+**Palette awareness (v0.2.0+):** the seven semantic defaults above (`background-color`, `text-color`, `disabled-text-color`, `highlight-color` / `highlighted-text-color`, `branch-line-color`, `horizontal-padding`) are sourced from Slint's `Palette` and `StyleMetrics` globals. The widget therefore follows the host application's theme automatically — including light/dark mode via `Palette.color-scheme` — with zero host wiring. Setting any of these properties on a `TreeView` instance still overrides the theme, exactly as before.
 
 ## Examples
 
