@@ -155,3 +155,32 @@ fn per_instance_behavior_properties_exist() {
     let result = compile_consumer(snippet);
     assert_no_diagnostics(&result);
 }
+
+#[test]
+fn style_defaults_track_palette() {
+    // Regression guard for the v0.2.0 Palette adaptation: the 7 mapped
+    // TreeViewStyle properties must still be referenceable from a
+    // consumer snippet (names + types unchanged), AND a consumer that
+    // sets one of them to a literal must still compile (per-instance
+    // override must win over the Palette-derived default). If the
+    // mapping regresses (renamed property, wrong type, or the
+    // Palette-derived default stops being overridable), this fails.
+    let snippet = r#"
+        import { TreeView, TreeViewStyle } from "@TreeView";
+
+        export component Demo inherits Window {
+            // Touch every mapped property by name — a rename drops here.
+            property <color> bg: TreeViewStyle.background-color;
+            property <color> fg: TreeViewStyle.text-color;
+            property <color> dt: TreeViewStyle.disabled-text-color;
+            property <color> hl: TreeViewStyle.highlight-color;
+            property <color> hlt: TreeViewStyle.highlighted-text-color;
+            property <color> blc: TreeViewStyle.branch-line-color;
+            property <length> hp: TreeViewStyle.horizontal-padding;
+
+            tv := TreeView {}
+        }
+    "#;
+    let result = compile_consumer(snippet);
+    assert_no_diagnostics(&result);
+}
