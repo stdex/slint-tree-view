@@ -88,17 +88,19 @@ jobs:
         working-directory: examples/basic
         run: cargo build --release
 
-  # NOTE: `Cargo.toml` declares `rust-version = "1.77"`, but Slint 1.17's
-  # own MSRV is 1.82 (see https://github.com/slint-ui/slint/issues/8501),
-  # so 1.77 cannot actually build this crate. We pin the MSRV job to 1.82
-  # to keep CI green; consider bumping `rust-version` in `Cargo.toml` to
-  # 1.82 so the declared MSRV matches what actually compiles.
+  # NOTE: `Cargo.toml` declares `rust-version = "1.77"`, but the resolved
+  # dependency graph requires much more. Slint 1.17 pulls accesskit_winit
+  # 0.33.2, whose manifest uses `edition = "2024"` — and edition 2024 only
+  # stabilized in Rust 1.85 (https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/).
+  # Older Cargo can't even *parse* that manifest, so the MSRV job must be
+  # pinned to >= 1.85. Consider bumping `rust-version` in `Cargo.toml` to
+  # 1.85 so the declared MSRV matches what actually compiles.
   msrv:
-    name: MSRV (1.82)
+    name: MSRV (1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.82
+      - uses: dtolnay/rust-toolchain@1.85
       - name: Install Slint system dependencies (Linux)
         run: |
           sudo apt-get update
