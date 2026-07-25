@@ -1,0 +1,59 @@
+// Example UI: a tiny tree of folders + leaves rendered by the reusable
+// TreeView. The Rust side builds the model and wires the four core
+// callbacks (current-changed, item-activated, item-expand-requested,
+// item-collapse-requested).
+//
+// For a frameless popup variant or a more elaborate layout, copy this
+// file and tweak — the wiring pattern stays the same.
+
+import { TreeView, TreeItem } from "@TreeView";
+
+export component App inherits Window {
+    title: "slint-tree-view — basic example";
+    preferred-width: 400px;
+    preferred-height: 500px;
+    background: #f8f8f8;
+
+    // The model is owned by the Rust controller; we just forward the
+    // TreeView's callbacks so it can react (and so it stays the single
+    // source of truth for `current-index` and expansion state).
+    forward-focus: tree;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        // Status line — shows what the last interaction was.
+        Text {
+            text: root.status-text;
+            height: 24px;
+        }
+
+        // The tree. `current-index` is in-out: TreeView updates it on
+        // click/keyboard, and the Rust controller can push a new value
+        // to programmatically move the focus.
+        tree := TreeView {
+            model: root.model;
+            current-index: root.current-index;
+            focused: true;
+
+            current-changed(id) => {
+                root.current-index = tree.current-index;
+                root.current-changed(id);
+            }
+            item-activated(id) => { root.item-activated(id); }
+            item-expand-requested(id) => { root.item-expand-requested(id); }
+            item-collapse-requested(id) => { root.item-collapse-requested(id); }
+        }
+    }
+
+    // ---- State + callbacks forwarded to Rust ----
+    in-out property <[TreeItem]> model;
+    in-out property <int> current-index: -1;
+    in-out property <string> status-text: "Try ↑/↓, Enter, ←/→, double-click…";
+
+    callback current-changed(int);
+    callback item-activated(int);
+    callback item-expand-requested(int);
+    callback item-collapse-requested(int);
+}

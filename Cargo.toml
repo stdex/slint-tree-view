@@ -1,0 +1,35 @@
+[package]
+name = "slint-tree-view"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "A reusable TreeView component for Slint, built with the experimental module build feature."
+license = "MIT OR Apache-2.0"
+keywords = ["slint", "treeview", "ui", "gui"]
+categories = ["gui"]
+readme = "README.md"
+repository = "https://github.com/stdex/slint-tree-view"
+documentation = "https://docs.rs/slint-tree-view"
+# `links` is what makes Cargo forward this crate's `cargo::metadata=*`
+# emissions (set by slint-build in build.rs) to downstream crates' build
+# scripts as `DEP_<NAME>_SLINT_LIBRARY_*` env vars. The slint-compiler in
+# the consumer crate then resolves `import { ... } from "@TreeView"` by
+# reading `DEP_TREEVIEW_SLINT_LIBRARY_NAME` (it uppercases the import name).
+# So the `links` value MUST match the Slint library name modulo case:
+# `as_library("TreeView")` ↔ `links = "treeview"`. Cargo uppercases the
+# `links` key the same way, producing `DEP_TREEVIEW_*`.
+links = "treeview"
+
+[dependencies]
+slint = "1.17"
+
+[build-dependencies]
+slint-build = { version = "1.17", features = ["experimental-module-builds"] }
+
+[dev-dependencies]
+# Used by the UI compile-test (tests/ui_compiles.rs) to compile a small
+# .slint snippet against this crate's library source at test time,
+# catching breakage in the exported API (struct fields, callback
+# signatures, property names) without spinning up a window.
+slint-interpreter = "1.17"
+spin_on = "0.1"

@@ -1,0 +1,618 @@
+// Reusable TreeView component for Slint.
+//
+// ## Design principle — "the view is dumb"
+//
+// The view never mutates state on its own — it emits callbacks and the
+// host (the single source of truth for `model`, `current-index`, and
+// per-item `expanded` state) updates its model, which flows back through
+// property bindings.
+//
+// ## Flat-list-with-depth
+//
+// Slint has no recursive component instantiation, so trees render as a
+// flat `ListView` where each item carries its `depth`. The host flattens
+// its hierarchical data via DFS and, on collapse, simply omits the
+// collapsed descendants from `model`.
+//
+// ## Slint syntax notes
+//
+// - Global property access uses a *dot*: `TreeViewStyle.row-height`.
+//   Double-colon `::` is reserved for enum values (e.g. `Key.Escape`).
+// - Local bindings are immutable (`let`); there are no `while` loops.
+//   Hence "find next selectable item" is delegated to the host via
+//   callbacks (see `current-parent-change-requested` for the pattern).
+// - `!flag` next to qualified property access confuses the parser; use
+//   `flag == false` instead.
+
+import { ListView } from "std-widgets.slint";
+
+// ───────────────────────────── enums ──────────────────────────────
+
+/// How a row is activated by the mouse. Popups/trays typically activate
+/// on single click, main windows on double.
+export enum ActivationMode {
+    single-click,
+    double-click
+}
+
+// ──────────────────────────── structs ─────────────────────────────
+
+/// One item in the tree. The host builds a `Vec<TreeItem>` (flattened
+/// via DFS with depth annotation) and hands it to `TreeView` via
+/// `model`.
+///
+///   - `internal-id`        — stable identifier, opaque to the view.
+///     Passed back in every callback.
+///   - `parent-internal-id` — `internal-id` of this item's parent, or
+///     `NO_PARENT` (-1) for top-level. Cached on the row so the view
+///     can emit `current-parent-change-requested` without searching.
+///   - `depth`              — nesting level (0 = top level). Each unit
+///     adds `TreeViewStyle.indentation` of left pad.
+///   - `text`               — user-visible label.
+///   - `decoration-text`    — optional leading glyph. Empty ⇒ nothing
+///     drawn. The host chooses the glyph — there is no built-in
+///     default (the view doesn't invent icons).
+///   - `item-type`          — application-defined discriminator. Not
+///     interpreted by the view; lets the host distinguish folders vs.
+///     files vs. clips vs. whatever without the view caring.
+///   - `user-data`          — opaque string payload. The view never
+///     reads it; typically the host stores the item body here so it
+///     can read it back from `model[current-index]` without a separate
+///     lookup.
+///   - `has-children`       — true if this item has at least one child
+///     (even if currently collapsed). Drives the branch indicator.
+///   - `expanded`           — current visual expansion state. ▼ when
+///     true, ▶ when false (for `has-children` items only).
+///   - `selectable`         — when false, the item is skipped by mouse
+///     selection and `current-changed` is not emitted for it. Useful
+///     for section headers / separators.
+///   - `enabled`            — when false, the item is greyed out and
+///     ignored by both mouse and keyboard.
+export struct TreeItem {
+    internal-id: int,
+    parent-internal-id: int,
+    depth: int,
+    text: string,
+    decoration-text: string,
+    item-type: int,
+    user-data: string,
+    has-children: bool,
+    expanded: bool,
+    selectable: bool,
+    enabled: bool,
+}
+
+// ──────────────────────────── styling ─────────────────────────────
+
+/// Themeable defaults for every `TreeView` in the app. Override globally
+/// from Slint:
+/// ```slint
+/// TreeViewStyle {
+///     highlight-color: @palette.primary;
+///     row-height: 24px;
+/// }
+/// ```
+/// …or from Rust via `slint_tree_view::TreeViewStyle::get(&win).set_*`.
+///
+/// **Colors and dimensions only.** Behavior flags (`items-expandable`,
+/// `root-is-decorated`, `expands-on-double-click`, `activation-mode`)
+/// live on the `TreeView` component itself, since they can vary per
+/// instance.
+export global TreeViewStyle {
+    // ---- Colors ----
+    in-out property <color> background-color: white;
+    in-out property <color> text-color: black;
+    in-out property <color> disabled-text-color: #999;
+
+    // Highlight (current item background + matching text color), in
+    // both the focused and inactive (window unfocused) variants.
+    in-out property <color> highlight-color: #cce4ff;
+    in-out property <color> highlighted-text-color: black;
+    in-out property <color> inactive-highlight-color: #e8e8e8;
+    in-out property <color> inactive-highlighted-text-color: black;
+
+    in-out property <color> hover-color: #f0f7ff;
+    // Disabled rows get this opacity applied to the whole row, on top of
+    // the greyed `disabled-text-color` — makes "this item is busy /
+    // locked" visually obvious.
+    in-out property <float>  disabled-opacity: 0.6;
+
+    // Branch indicator (▶/▼ glyph) + guide strip drawn in the indent.
+    in-out property <color> branch-indicator-color: #555;
+    in-out property <color> branch-line-color: transparent;
+
+    // Reserved for the future drag&drop target line. Not read today;
+    // published so hosts can theme it ahead of the DnD feature landing.
+    in-out property <color> drop-indicator-color: #2266aa;
+
+    // ---- Dimensions ----
+    in-out property <length> row-height: 28px;
+    in-out property <length> indentation: 20px;
+    in-out property <length> branch-indicator-width: 16px;
+    in-out property <length> decoration-spacing: 6px;     // gap between icon and text
+    in-out property <length> horizontal-padding: 4px;
+
+    // ---- Glyphs (override for icon-font / emoji themes) ----
+    in-out property <string> expanded-branch-indicator: "▼";
+    in-out property <string> collapsed-branch-indicator: "▶";
+}
+
+// ──────────────────────────── component ───────────────────────────
+
+/// A flat-list TreeView with depth-based indentation, keyboard
+/// navigation, expand/collapse, accessibility hooks, and full theming
+/// via `TreeViewStyle`.
+///
+/// **Focus**: the component declares `forward-focus` to an internal
+/// `FocusScope`. To receive keyboard events, the host must either give
+/// the TreeView focus (e.g. `forward-focus: tree;` on the Window) or
+/// call `tree.focus()` from Rust.
+export component TreeView inherits Rectangle {
+    background: TreeViewStyle.background-color;
+
+    // ---- Data (host is the single source of truth) ----
+    // `in` (not `in-out`): the view never mutates the model. It reads
+    // through the model and reports interactions back via callbacks.
+    in property <[TreeItem]> model;
+
+    // ---- Current item (single-selection) ----
+    // The current item is the keyboard focus / single selection. A
+    // separate multi-selection API is roadmap.
+    in-out property <int> current-index: -1;
+
+    /// Read-only id mirror of `current-index`. Hosts should prefer this
+    /// over the index for correlating with their data — indices shift
+    /// when the model is rebuilt, ids don't.
+    out property <int> current-internal-id:
+        root.current-index >= 0 && root.current-index < root.model.length
+            ? root.model[root.current-index].internal-id
+            : -1;
+
+    /// When true, the TreeView uses `highlight-color`; otherwise
+    /// `inactive-highlight-color`. The host should bind this to whether
+    /// the TreeView's window has active focus. (Defaults to true so a
+    /// standalone app doesn't show an unexpectedly grey selection.)
+    in property <bool> focused: true;
+
+    // ---- Behavior (per-instance) ----
+    /// Whether the user can expand/collapse branches interactively.
+    /// When false, branch indicators are still drawn (per
+    /// `root-is-decorated` and `has-children`) but clicks/keys on them
+    /// are no-ops.
+    in property <bool> items-expandable: true;
+    /// Whether to draw the ▶/▼ branch indicator at the root level
+    /// (`depth == 0`). Set false when the top level is a flat list of
+    /// independent categories that shouldn't look collapsible.
+    in property <bool> root-is-decorated: true;
+    /// Whether double-clicking a branch toggles its expansion (instead
+    /// of activating it).
+    in property <bool> expands-on-double-click: true;
+    /// Mouse activation policy: popups/trays → single-click, main
+    /// windows → double-click.
+    in property <ActivationMode> activation-mode: ActivationMode.double-click;
+    /// Highlight the item under the mouse cursor. Disable for modal/tray
+    /// UIs where hover is visually noisy.
+    in property <bool> hover-highlight: true;
+    /// Number of items to jump on PageUp/PageDown. -1 ⇒ heuristic
+    /// default of 10 (Slint doesn't expose ListView viewport size).
+    in property <int> page-size: -1;
+
+    // ---- Callbacks (host updates its model in response) ----
+    /// The current item changed — by click or keyboard. The host should
+    /// update its `current-index` to match the row with this id.
+    callback current-changed(int /* internal-id */);
+    /// A row was clicked.
+    callback item-clicked(int /* internal-id */);
+    /// A row was double-clicked. Useful when `activation-mode` is
+    /// `single-click` and the host still wants to distinguish dblclick.
+    callback item-double-clicked(int /* internal-id */);
+    /// A row was activated (per `activation-mode`, or Enter key, or
+    /// double-click on a leaf).
+    callback item-activated(int /* internal-id */);
+
+    /// Request to expand a branch (click on ▶, Right/Plus key, or
+    /// double-click per `expands-on-double-click`). The host should set
+    /// `expanded = true` on the matching item and re-flatten `model`.
+    callback item-expand-requested(int /* internal-id */);
+    /// Request to collapse a branch (click on ▼, Left/Minus key, or
+    /// double-click per `expands-on-double-click`).
+    callback item-collapse-requested(int /* internal-id */);
+    /// Recursive expand/collapse request (Asterisk key, or Shift+double-
+    /// click on the branch indicator). The host walks the subtree.
+    /// `depth == -1` means "unlimited".
+    callback recursive-expand-requested(
+        int /* internal-id */, bool /* expand */, int /* depth */
+    );
+
+    /// Left-arrow on a collapsed branch or leaf: the host should move
+    /// `current-index` to the parent. The view emits the parent id
+    /// (cached on the row) because Slint can't search the model from
+    /// here. Only emitted when `parent-internal-id >= 0` (i.e. not at
+    /// root).
+    callback current-parent-change-requested(
+        int /* internal-id */, int /* parent-internal-id */
+    );
+
+    /// Right-click → host opens a context menu at `(x, y)` (in
+    /// TreeView-local logical coordinates).
+    callback custom-context-menu-requested(
+        int /* internal-id */, length /* x */, length /* y */
+    );
+
+    /// An unmapped key was pressed while the TreeView has focus. Return
+    /// `accept` to mark the event handled (it won't bubble), `reject` to
+    /// let it propagate. Lets hosts add custom shortcuts (number-key
+    /// quick-pick, F2 rename, type-ahead search).
+    callback key-press-event(KeyEvent) -> EventResult;
+
+    // Forward Window-level focus into our internal key handler.
+    forward-focus: key-scope;
+
+    // ---- Pure helpers ------------------------------------------------
+
+    /// Branch indicator glyph for an item, or "" if none should be drawn.
+    /// Respects `items-expandable` (no, suppresses glyph), `root-is-
+    /// decorated` (no glyph at depth 0), and `has-children`.
+    function branch-indicator(item: TreeItem) -> string {
+        if (item.has-children == false) { return ""; }
+        if (root.items-expandable == false) { return ""; }
+        if (root.root-is-decorated == false && item.depth == 0) { return ""; }
+        return item.expanded
+            ? TreeViewStyle.expanded-branch-indicator
+            : TreeViewStyle.collapsed-branch-indicator;
+    }
+
+    /// Clamp an index to the valid range `[-1, len-1]`. Used by keyboard
+    /// nav and exposed for the host.
+    function clamp-index(idx: int, len: int) -> int {
+        if (len == 0) { return -1; }
+        if (idx < 0) { return 0; }
+        if (idx >= len) { return len - 1; }
+        return idx;
+    }
+
+    /// True if `text` is a key the TreeView handles internally.
+    function is-handled-key(text: string) -> bool {
+        text == Key.UpArrow || text == Key.DownArrow
+            || text == Key.Home || text == Key.End
+            || text == Key.Return
+            || text == Key.RightArrow || text == Key.LeftArrow
+            || text == Key.PageUp || text == Key.PageDown
+            || text == Key.Plus || text == Key.HyphenMinus
+            || text == Key.Asterisk
+    }
+
+    /// Resolve the page-up/down step. `-1` (default) ⇒ heuristic 10.
+    function page-step() -> int {
+        root.page-size > 0 ? root.page-size : 10
+    }
+
+    /// Can the item be the current item? Requires both `enabled` and
+    /// `selectable`. Centralises the "skip section headers + disabled"
+    /// rule that the keyboard handler and mouse click both enforce.
+    function is-selectable-item(item: TreeItem) -> bool {
+        item.enabled && item.selectable
+    }
+
+    // ---- Internal: set current-index with bounds safety ----
+    // The host's `current-changed` handler may rebuild `model` between
+    // events, so every selection move re-validates the index after the
+    // callback fires.
+    function safe-set-current(idx: int) {
+        root.current-index = root.clamp-index(idx, root.model.length);
+        if (root.current-index >= 0) {
+            root.current-changed(root.model[root.current-index].internal-id);
+        }
+    }
+
+    // ---- Keyboard handler --------------------------------------------
+
+    key-scope := FocusScope {
+        key-pressed(event) => {
+            // 1. Host first crack at unmapped keys.
+            if (root.is-handled-key(event.text) == false) {
+                return root.key-press-event(event);
+            }
+
+            // 2. No current item yet — pick the first selectable one for
+            //    nav/activation keys, then fall through for activation
+            //    keys (Enter/Left/Right) so the action isn't silently
+            //    swallowed.
+            if (root.current-index < 0) {
+                if (root.model.length == 0) { return accept; }
+                root.current-index = 0;
+                root.current-changed(root.model[0].internal-id);
+                if (event.text != Key.Return
+                    && event.text != Key.LeftArrow
+                    && event.text != Key.RightArrow) {
+                    return accept;
+                }
+            }
+
+            // 3. Re-validate index (the host may have rebuilt `model`).
+            if (root.current-index < 0
+                || root.current-index >= root.model.length) {
+                return accept;
+            }
+
+            // 4. Dispatch.
+            if (event.text == Key.UpArrow) {
+                root.step-current(-1);
+                accept
+            } else if (event.text == Key.DownArrow) {
+                root.step-current(1);
+                accept
+            } else if (event.text == Key.PageUp) {
+                root.step-current(-root.page-step());
+                accept
+            } else if (event.text == Key.PageDown) {
+                root.step-current(root.page-step());
+                accept
+            } else if (event.text == Key.Home) {
+                root.safe-set-current(0);
+                accept
+            } else if (event.text == Key.End) {
+                root.safe-set-current(root.model.length - 1);
+                accept
+            } else if (event.text == Key.LeftArrow) {
+                root.handle-left();
+                accept
+            } else if (event.text == Key.RightArrow
+                || event.text == Key.Plus) {
+                root.handle-right(false);
+                accept
+            } else if (event.text == Key.Asterisk) {
+                root.handle-right(true);
+                accept
+            } else if (event.text == Key.HyphenMinus) {
+                root.collapse-current();
+                accept
+            } else if (event.text == Key.Return) {
+                root.activate-current();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    /// Move current by `delta` rows, clamped. (Slint has no `while`, so
+    /// skipping non-selectable rows during the step is delegated to the
+    /// host — see README "Slint language limitations". The host's
+    /// `current-changed` handler receives whatever landed and can adjust.)
+    function step-current(delta: int) {
+        let len = root.model.length;
+        if (len == 0) { return; }
+        let target = root.clamp-index(root.current-index + delta, len);
+        root.safe-set-current(target);
+    }
+
+    /// Left-arrow on a branch: collapse if expanded, otherwise ask the
+    /// host to move current to the parent (the conventional "second Left
+    /// jumps to parent" behavior).
+    function handle-left() {
+        if (root.current-index < 0
+            || root.current-index >= root.model.length) {
+            return;
+        }
+        let item = root.model[root.current-index];
+        if (item.has-children && item.expanded) {
+            root.item-collapse-requested(item.internal-id);
+        } else if (item.parent-internal-id >= 0) {
+            // Don't emit at root — there's no parent to move to.
+            root.current-parent-change-requested(
+                item.internal-id, item.parent-internal-id);
+        }
+    }
+
+    /// Right-arrow / Plus: expand a collapsed branch. Asterisk: recursive
+    /// expand (passes `recursive = true`).
+    function handle-right(recursive: bool) {
+        if (root.current-index < 0
+            || root.current-index >= root.model.length) {
+            return;
+        }
+        let item = root.model[root.current-index];
+        if (item.has-children == false) { return; }
+        if (recursive) {
+            root.recursive-expand-requested(item.internal-id, true, -1);
+        } else if (item.expanded == false) {
+            root.item-expand-requested(item.internal-id);
+        }
+    }
+
+    /// Collapse the current branch unconditionally (Minus key).
+    function collapse-current() {
+        if (root.current-index < 0
+            || root.current-index >= root.model.length) {
+            return;
+        }
+        let item = root.model[root.current-index];
+        if (item.has-children && item.expanded) {
+            root.item-collapse-requested(item.internal-id);
+        }
+    }
+
+    /// Activate the current item (Enter), gated on `enabled`.
+    function activate-current() {
+        if (root.current-index < 0
+            || root.current-index >= root.model.length) {
+            return;
+        }
+        let item = root.model[root.current-index];
+        if (item.enabled) {
+            root.item-activated(item.internal-id);
+        }
+    }
+
+    // ---- View ---------------------------------------------------------
+
+    ListView {
+        for item[i] in root.model: Rectangle {
+            height: TreeViewStyle.row-height;
+            // Visually fade disabled rows. (Selection/hover still apply
+            // underneath — `opacity` is multiplicative.)
+            opacity: item.enabled ? 1.0 : TreeViewStyle.disabled-opacity;
+
+            background: item.enabled == false
+                ? transparent
+                : (touch.has-hover && root.hover-highlight
+                    ? TreeViewStyle.hover-color
+                    : (i == root.current-index
+                        ? (root.focused
+                            ? TreeViewStyle.highlight-color
+                            : TreeViewStyle.inactive-highlight-color)
+                        : transparent));
+
+            // Accessibility — expose the item to assistive tech with its
+            // label. Slint 1.17 has no `accessible-expanded`/
+            // `accessible-disabled`; when those land, bind them to
+            // `item.expanded`/`item.enabled`.
+            accessible-role: list-item;
+            accessible-label: item.text;
+
+            HorizontalLayout {
+                spacing: 0px;
+
+                    // Indent spacer + optional vertical guide line.
+                    // `branch-line-color` only colors this strip — to
+                    // draw proper L/T guide lines we'd need a Path /
+                    // overlay; tracked in README roadmap.
+                    Rectangle {
+                        width: item.depth * TreeViewStyle.indentation;
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        background: TreeViewStyle.branch-line-color;
+                    }
+
+                    HorizontalLayout {
+                        spacing: TreeViewStyle.decoration-spacing;
+                        padding-left: TreeViewStyle.horizontal-padding;
+                        padding-right: TreeViewStyle.horizontal-padding;
+                        horizontal-stretch: 1;
+
+                        // Branch indicator (▶/▼). Has a dedicated
+                        // TouchArea below so clicks on it don't change
+                        // current-item. `z: 1` keeps it above the row-
+                        // level TouchArea when both overlap.
+                        Rectangle {
+                            width: TreeViewStyle.branch-indicator-width;
+                            horizontal-stretch: 0;
+                            vertical-stretch: 0;
+                            Text {
+                                text: root.branch-indicator(item);
+                                color: TreeViewStyle.branch-indicator-color;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                            TouchArea {
+                                z: 1;
+                                enabled: root.branch-indicator(item) != ""
+                                    && root.items-expandable;
+                                clicked => {
+                                    if (item.expanded) {
+                                        root.item-collapse-requested(item.internal-id);
+                                    } else {
+                                        root.item-expand-requested(item.internal-id);
+                                    }
+                                }
+                                // Shift+double-click requests a recursive
+                                // expand/collapse (IDE pattern).
+                                double-clicked => {
+                                    if (root.items-expandable) {
+                                        root.recursive-expand-requested(
+                                            item.internal-id,
+                                            item.expanded == false,
+                                            -1);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Item decoration — the host's choice, or
+                        // nothing. The view does not invent icons.
+                        Text {
+                            visible: item.decoration-text != "";
+                            text: item.decoration-text;
+                            vertical-alignment: center;
+                            color: root.text-color-for(item);
+                        }
+
+                        // Item text. Stretches to fill remaining width so
+                        // `overflow: elide` works as expected.
+                        Text {
+                            text: item.text;
+                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            color: root.text-color-for(item);
+                        }
+                    }
+            }
+
+            // Row-level click target (everything except the indicator).
+            touch := TouchArea {
+                enabled: item.enabled;
+                clicked => {
+                    if (root.is-selectable-item(item)) {
+                        root.current-index = i;
+                        root.current-changed(item.internal-id);
+                        root.item-clicked(item.internal-id);
+                        if (root.activation-mode == ActivationMode.single-click) {
+                            root.item-activated(item.internal-id);
+                        }
+                    }
+                }
+                double-clicked => {
+                    if (root.is-selectable-item(item)) {
+                        root.item-double-clicked(item.internal-id);
+                        if (root.activation-mode == ActivationMode.double-click) {
+                            // Per `expands-on-double-click`: double-click
+                            // on a branch toggles it rather than
+                            // activating.
+                            if (item.has-children && root.expands-on-double-click) {
+                                if (item.expanded) {
+                                    root.item-collapse-requested(item.internal-id);
+                                } else {
+                                    root.item-expand-requested(item.internal-id);
+                                }
+                            } else {
+                                root.item-activated(item.internal-id);
+                            }
+                        }
+                    }
+                }
+                // Right-click → context menu. Slint's TouchArea exposes
+                // a low-level `pointer-event(PointerEvent)` callback; we
+                // filter it for the right-button-down case. (There's no
+                // dedicated `right-clicked` in 1.17.)
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.right
+                        && e.kind == PointerEventKind.down
+                        && item.enabled) {
+                        root.custom-context-menu-requested(
+                            item.internal-id,
+                            touch.mouse-x,
+                            touch.mouse-y);
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve the text color for an item given selection + enabled
+    // state. Centralises the "highlighted text on selected rows" rule
+    // so the title and decoration stay in sync.
+    function text-color-for(item: TreeItem) -> color {
+        if (item.enabled == false) {
+            TreeViewStyle.disabled-text-color;
+        } else if (item.internal-id == root.current-internal-id) {
+            root.focused
+                ? TreeViewStyle.highlighted-text-color
+                : TreeViewStyle.inactive-highlighted-text-color;
+        } else {
+            TreeViewStyle.text-color;
+        }
+    }
+}
