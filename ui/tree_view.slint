@@ -24,7 +24,7 @@
 // - `!flag` next to qualified property access confuses the parser; use
 //   `flag == false` instead.
 
-import { ListView } from "std-widgets.slint";
+import { ListView, Palette, StyleMetrics } from "std-widgets.slint";
 
 // ───────────────────────────── enums ──────────────────────────────
 
@@ -100,14 +100,21 @@ export struct TreeItem {
 /// instance.
 export global TreeViewStyle {
     // ---- Colors ----
-    in-out property <color> background-color: white;
-    in-out property <color> text-color: black;
-    in-out property <color> disabled-text-color: #999;
+    // Semantic defaults are sourced from Slint's `Palette` global, so the
+    // widget follows the host app's theme (and light/dark via
+    // `Palette.color-scheme`) automatically. A consumer can still override
+    // any of these per-instance; the literal then wins over the
+    // Palette-derived default.
+    in-out property <color> background-color: Palette.background;
+    in-out property <color> text-color: Palette.foreground;
+    in-out property <color> disabled-text-color: Palette.alternate-foreground;
 
     // Highlight (current item background + matching text color), in
-    // both the focused and inactive (window unfocused) variants.
-    in-out property <color> highlight-color: #cce4ff;
-    in-out property <color> highlighted-text-color: black;
+    // both the focused and inactive (window unfocused) variants. The
+    // focused pair tracks `Palette.selection-*`; the inactive pair has
+    // no Palette equivalent and stays TreeView-specific.
+    in-out property <color> highlight-color: Palette.selection-background;
+    in-out property <color> highlighted-text-color: Palette.selection-foreground;
     in-out property <color> inactive-highlight-color: #e8e8e8;
     in-out property <color> inactive-highlighted-text-color: black;
 
@@ -119,7 +126,7 @@ export global TreeViewStyle {
 
     // Branch indicator (▶/▼ glyph) + guide strip drawn in the indent.
     in-out property <color> branch-indicator-color: #555;
-    in-out property <color> branch-line-color: transparent;
+    in-out property <color> branch-line-color: Palette.border;
 
     // Reserved for the future drag&drop target line. Not read today;
     // published so hosts can theme it ahead of the DnD feature landing.
@@ -130,7 +137,7 @@ export global TreeViewStyle {
     in-out property <length> indentation: 20px;
     in-out property <length> branch-indicator-width: 16px;
     in-out property <length> decoration-spacing: 6px;     // gap between icon and text
-    in-out property <length> horizontal-padding: 4px;
+    in-out property <length> horizontal-padding: StyleMetrics.layout-padding;
 
     // ---- Glyphs (override for icon-font / emoji themes) ----
     in-out property <string> expanded-branch-indicator: "▼";
