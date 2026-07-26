@@ -23,3 +23,8 @@ target
 
 # Local design/working notes (not published)
 docs/
+
+# Screenshots live on the orphan `assets` branch (keeps binary bloat
+# out of main's history and out of the published crate). Local copies
+# should never be committed to main.
+/*.png

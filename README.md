@@ -4,6 +4,10 @@ A reusable **TreeView** component for [Slint](https://slint.dev), packaged as a 
 
 Slint does not yet ship a built-in TreeView ([slint-ui/slint#505](https://github.com/slint-ui/slint/issues/505)). This crate fills that gap using the canonical flat-list-with-depth pattern (recommended by the Slint team in [discussion #1042](https://github.com/slint-ui/slint/discussions/1042)) and exposes it via the `experimental-module-builds` feature introduced in Slint 1.14.
 
+![Basic example screenshot](https://raw.githubusercontent.com/stdex/slint-tree-view/assets/image.png)
+
+*The `examples/basic/` app — a tiny interactive tree with branches, leaves, and a section header.*
+
 ## Features
 
 - **Hierarchical display via flat-list-with-depth.** The host flattens its tree into a `Vec<TreeItem>`; the component handles indentation and selection.
