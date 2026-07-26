@@ -210,7 +210,7 @@ style.set_row_height(22.0);
 | | `inactive-highlight-color` / `inactive-highlighted-text-color` | `#e8e8e8` / `black` |
 | | `hover-color` | `#f0f7ff` |
 | | `branch-indicator-color` | `#555` |
-| | `branch-line-color` | `Palette.border` (sets the indent strip's bg; real L/T guide lines are roadmap) |
+| | `branch-line-color` | `transparent` (sets the indent strip's bg; real L/T guide lines are roadmap) |
 | | `drop-indicator-color` | `#2266aa` (reserved for future DnD) |
 | **Dimensions** | `row-height` | `28px` |
 | | `indentation` | `20px` |
@@ -223,7 +223,7 @@ style.set_row_height(22.0);
 
 Behavior flags (`items-expandable`, `root-is-decorated`, `expands-on-double-click`, `activation-mode`, `hover-highlight`, `page-size`) are **per-instance** properties on `TreeView`, not on the global — they can differ between TreeViews in the same app. The global only carries theme colors / dimensions / glyphs.
 
-**Palette awareness (v0.2.0+):** the seven semantic defaults above (`background-color`, `text-color`, `disabled-text-color`, `highlight-color` / `highlighted-text-color`, `branch-line-color`, `horizontal-padding`) are sourced from Slint's `Palette` and `StyleMetrics` globals. The widget therefore follows the host application's theme automatically — including light/dark mode via `Palette.color-scheme` — with zero host wiring. Setting any of these properties on a `TreeView` instance still overrides the theme, exactly as before.
+**Palette awareness (v0.2.0+):** six semantic defaults above (`background-color`, `text-color`, `disabled-text-color`, `highlight-color` / `highlighted-text-color`, `horizontal-padding`) are sourced from Slint's `Palette` and `StyleMetrics` globals. The widget therefore follows the host application's theme automatically — including light/dark mode via `Palette.color-scheme` — with zero host wiring. Setting any of these properties on a `TreeView` instance still overrides the theme, exactly as before.
 
 ## Examples
 

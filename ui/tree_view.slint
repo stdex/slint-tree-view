@@ -126,7 +126,7 @@ export global TreeViewStyle {
 
     // Branch indicator (▶/▼ glyph) + guide strip drawn in the indent.
     in-out property <color> branch-indicator-color: #555;
-    in-out property <color> branch-line-color: Palette.border;
+    in-out property <color> branch-line-color: transparent;
 
     // Reserved for the future drag&drop target line. Not read today;
     // published so hosts can theme it ahead of the DnD feature landing.
@@ -461,14 +461,20 @@ export component TreeView inherits Rectangle {
             // underneath — `opacity` is multiplicative.)
             opacity: item.enabled ? 1.0 : TreeViewStyle.disabled-opacity;
 
+            // Background priority: disabled → current item → hover → none.
+            // Current wins over hover so the selected row stays visibly
+            // selected (with its matched highlight-bg/fg pair) when moused
+            // over — otherwise hover-bg would override the selection bg
+            // while the text stayed the selection color, producing
+            // unreadable light-on-light.
             background: item.enabled == false
                 ? transparent
-                : (touch.has-hover && root.hover-highlight
-                    ? TreeViewStyle.hover-color
-                    : (i == root.current-index
-                        ? (root.focused
-                            ? TreeViewStyle.highlight-color
-                            : TreeViewStyle.inactive-highlight-color)
+                : (i == root.current-index
+                    ? (root.focused
+                        ? TreeViewStyle.highlight-color
+                        : TreeViewStyle.inactive-highlight-color)
+                    : (touch.has-hover && root.hover-highlight
+                        ? TreeViewStyle.hover-color
                         : transparent));
 
             // Accessibility — expose the item to assistive tech with its
