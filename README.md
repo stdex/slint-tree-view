@@ -70,6 +70,26 @@ export component App inherits Window {
 }
 ```
 
+**Import from `@TreeView` in the file your `build.rs` compiles**, even
+when the `TreeView` itself sits in another `.slint` file further down.
+As of Slint 1.18, the compiler only looks at the imports of that root
+file to learn which types belong to a library. If only a nested file
+imports `@TreeView`, it generates its own, unrelated `TreeItem`, and
+passing `slint_tree_view::TreeItem` to a generated setter fails with
+
+```text
+expected `slint_generatedAppWindow::TreeItem`, found `slint_tree_view::TreeItem`
+```
+
+One import line in the root file fixes it. Any name from the library
+will do, used or not:
+
+```slint
+// ui/appwindow.slint, the file passed to slint_build::compile
+import { TreeItem } from "@TreeView";
+import { ChannelsPage } from "pages/channels_page.slint"; // uses TreeView
+```
+
 ### 4. Build the model from Rust
 
 ```rust
