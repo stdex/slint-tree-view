@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Screen-reader support.** Navigating the tree with the keyboard used
+  to announce nothing but the window title: the keyboard focus sat in an
+  internal `FocusScope` with no accessible node of its own. The
+  `TreeView` is now an accessible `tree` that hands the screen reader's
+  focus to the current row, and rows report their selected, enabled and
+  expanded state and their position.
+- `TreeItem::label` and `.with_label()`: what a screen reader announces
+  for the row instead of `text`, when not empty.
+
+### Changed
+
+- **Breaking:** `TreeItem` has a new `label` field, so Rust code that
+  builds one with a struct literal has to set it (the constructors do).
+
 ## [0.3.1] — 2026-10-17
 
 ### Changed

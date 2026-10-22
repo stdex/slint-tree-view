@@ -97,10 +97,29 @@ fn tree_item_struct_has_documented_fields() {
             tv := TreeView {
                 model: [{
                     internal-id: 1, parent-internal-id: -1, depth: 0,
-                    text: "x", decoration-text: "", item-type: 0,
+                    text: "x", label: "", decoration-text: "", item-type: 0,
                     user-data: "", has-children: false, expanded: false,
                     selectable: true, enabled: true,
                 }];
+            }
+        }
+    "#;
+    let result = compile_consumer(snippet);
+    assert_no_diagnostics(&result);
+}
+
+#[test]
+fn tree_view_can_be_named_for_screen_readers() {
+    // `accessible-label` only compiles on an element with an
+    // `accessible-role`, so this pins the TreeView itself being the
+    // accessible tree (the node the screen reader's focus is delegated
+    // from), not some element inside it.
+    let snippet = r#"
+        import { TreeView } from "@TreeView";
+
+        export component Demo inherits Window {
+            TreeView {
+                accessible-label: "Mailboxes";
             }
         }
     "#;

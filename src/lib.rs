@@ -45,6 +45,7 @@ impl TreeItem {
             parent_internal_id,
             depth,
             text: text.into(),
+            label: "".into(),
             decoration_text: "".into(),
             item_type: 0,
             user_data: String::new().into(),
@@ -70,6 +71,7 @@ impl TreeItem {
             parent_internal_id,
             depth,
             text: text.into(),
+            label: "".into(),
             decoration_text: "".into(),
             item_type: 0,
             user_data: user_data.into(),
@@ -94,6 +96,7 @@ impl TreeItem {
             parent_internal_id,
             depth,
             text: text.into(),
+            label: "".into(),
             decoration_text: "".into(),
             item_type: 0,
             user_data: String::new().into(),
@@ -111,6 +114,12 @@ impl TreeItem {
     /// above). Alias of [`with_decoration`](Self::with_decoration).
     pub fn with_icon(self, icon: impl Into<slint::SharedString>) -> Self {
         self.with_decoration(icon)
+    }
+
+    /// Chain an accessible label used by screen readers onto an item.
+    pub fn with_label(mut self, label: impl Into<slint::SharedString>) -> Self {
+        self.label = label.into();
+        self
     }
 
     /// Chain an arbitrary decoration string (the icon/glyph shown before

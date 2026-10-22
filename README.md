@@ -16,9 +16,9 @@ Slint does not yet ship a built-in TreeView ([slint-ui/slint#505](https://github
 - **Activation policy** — `activation-mode: single-click | double-click`. `expands-on-double-click` toggles whether double-clicking a branch expands it or activates it.
 - **Full theming** — every style property is settable per instance (colors, dimensions, glyphs), with the `TreeViewStyle` global supplying the defaults.
 - **Non-selectable / disabled items.** `selectable: false` for section headers (skipped by mouse); `enabled: false` for greyed-out items, applied via both `disabled-text-color` and a multiplicative `disabled-opacity` so it's visually obvious.
-- **Accessibility hooks** — every item exposes `accessible-role: list-item` + `accessible-label`.
+- **Screen-reader support** — the TreeView is an accessible `tree` that hands the screen reader's focus to the current row, so it is announced while navigating with the keyboard. Rows report their label (`label`, falling back to `text`), selected / enabled / expanded state and position. Set `accessible-label` on the `TreeView` to name the tree itself.
 - **Right-click → context menu** via `pointer-event` (filters for right-button-down; Slint 1.17 has no dedicated `right-clicked`).
-- **Rust DX** — `TreeItem::branch()` / `::leaf()` / `::section()` constructors; fluent builder methods (`.with_icon()`, `.with_decoration()`, `.collapsed()`, `.disabled()`, `.non_selectable()`, `.with_item_type()`, `.with_user_data()`); `NO_PARENT` sentinel; `index_of_id()` / `index_of_id_model()` lookup helpers; constructors take `impl Into<slint::SharedString>` so `&str` / `String` / `SharedString` all work without extra allocations.
+- **Rust DX** — `TreeItem::branch()` / `::leaf()` / `::section()` constructors; fluent builder methods (`.with_icon()`, `.with_decoration()`, `.with_label()`, `.collapsed()`, `.disabled()`, `.non_selectable()`, `.with_item_type()`, `.with_user_data()`); `NO_PARENT` sentinel; `index_of_id()` / `index_of_id_model()` lookup helpers; constructors take `impl Into<slint::SharedString>` so `&str` / `String` / `SharedString` all work without extra allocations.
 - `#![deny(unsafe_code)]` at the crate root (Slint's generated vtable module locally allows `unsafe` for its plumbing).
 
 ## Quick start
@@ -99,6 +99,7 @@ export struct TreeItem {
     parent-internal-id: int,  // NO_PARENT (-1) = root; cached for jump-to-parent
     depth: int,               // 0 = top level; each unit adds `indentation`
     text: string,             // user-visible label
+    label: string,            // read by screen readers instead of `text`; empty = `text`
     decoration-text: string,  // host-chosen glyph; empty = nothing drawn
     item-type: int,           // app-defined discriminator; not interpreted
     user-data: string,        // opaque payload; never read by the component
@@ -120,6 +121,7 @@ export struct TreeItem {
 | Builder | Effect |
 |---|---|
 | `.with_icon(glyph)` / `.with_decoration(glyph)` | Set `decoration-text`. |
+| `.with_label(string)` | Set `label`, what screen readers announce instead of `text`. |
 | `.collapsed()` / `.with_expanded(bool)` | Override the default expand state. |
 | `.disabled()` | Set `enabled = false`. |
 | `.non_selectable()` | Set `selectable = false`. |
@@ -282,7 +284,7 @@ A few behaviors are **impossible to implement inside the `.slint` file** because
 
 Likely additions as the need arises (contributions welcome):
 
-- **`accessible-expanded` / `accessible-disabled`** bindings as soon as Slint supports them on `AccessibleRole::list-item` (currently a 1.17 gap).
+- **Native expanded / collapsed state on Linux.** `accessible-expanded` is bound, but AccessKit's AT-SPI adapter doesn't forward it yet, so rows also spell the state out in their `accessible-description`. Drop that once it does.
 - **Multi-selection.** `selected-internal-ids: [int]` alongside `current-index`, plus a `selection-mode` flag (single / multi / extended). Shift+Click and Ctrl+Click would arrive via the existing `key-press-event` callback (Slint reports modifier state on the KeyEvent).
 - **Multi-column support.** Single-column for v1; adding a `columns: [TreeColumn]` property (header label + per-item cell) is the natural extension.
 - **Drag & drop reorder.** Per-item `Rectangle` already has the structure to host a `DropArea`; what's missing is the protocol for the host to express "this item accepts drops onto / between". `auto-expand-delay-ms` would fold in once DnD exists.
